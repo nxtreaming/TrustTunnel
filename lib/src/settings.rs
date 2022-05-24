@@ -352,7 +352,7 @@ impl Default for Settings {
                 ListenProtocolSettings::Http2(Http2Settings::builder().build()),
                 ListenProtocolSettings::Quic(QuicSettings::builder().build()),
             ],
-            authorizer: Settings::default_authorizer(),
+            authenticator: Settings::default_authenticator(),
             icmp: None,
             metrics: Default::default(),
         }
