@@ -50,9 +50,9 @@ Test on macOS:
         scripts:
           - |-
             set -x -e
-            cargo test
+            cargo test --target x86_64-apple-darwin
             cd lib
-            cargo test
+            cargo test --target x86_64-apple-darwin
   requirements:
     - macOS 11.0 or later
   artifact-subscriptions: [ ]

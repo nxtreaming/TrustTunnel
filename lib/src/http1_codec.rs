@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use bytes::{BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
-use crate::{datagram_pipe, http_codec, log_id, log_utils, net_utils, pipe, utils};
+use crate::{datagram_pipe, http_codec, log_id, log_utils, net_utils, pipe, settings, utils};
 use crate::protocol_selector::Protocol;
 use crate::http_codec::{RequestHeaders, ResponseHeaders};
 use crate::settings::Settings;
@@ -15,7 +15,6 @@ use crate::settings::Settings;
 
 pub(crate) const MAX_RAW_HEADERS_SIZE: usize = 1024;
 pub(crate) const MAX_HEADERS_NUM: usize = 32;
-const TRAFFIC_READ_CHUNK_SIZE: usize = 16 * 1024;
 
 
 pub(crate) struct Http1Codec<IO> {
@@ -29,6 +28,7 @@ pub(crate) struct Http1Codec<IO> {
     upload_rx: Option<mpsc::Receiver<Option<Bytes>>>,
     /// Sends messages to [`StreamSource.upload_rx`]
     upload_tx: mpsc::Sender<Option<Bytes>>,
+    upload_buffer_size: usize,
     parent_id_chain: log_utils::IdChain<u64>,
     next_request_id: std::ops::RangeFrom<u64>,
 }
@@ -82,7 +82,7 @@ impl<IO> Http1Codec<IO>
     where IO: net_utils::PeerAddr
 {
     pub fn new(
-        _core_settings: Arc<Settings>,
+        core_settings: Arc<Settings>,
         transport_stream: IO,
         parent_id_chain: log_utils::IdChain<u64>,
     ) -> Self {
@@ -98,6 +98,14 @@ impl<IO> Http1Codec<IO>
             download_tx: Some(download_tx),
             upload_rx: Some(upload_rx),
             upload_tx,
+            upload_buffer_size: core_settings.listen_protocols.iter()
+                .find(|x| matches!(x, settings::ListenProtocolSettings::Http1(_)))
+                .map(|x| match x {
+                    settings::ListenProtocolSettings::Http1(x) => x,
+                    _ => unreachable!(),
+                })
+                .unwrap()
+                .upload_buffer_size,
             parent_id_chain,
             next_request_id: 0..,
         }
@@ -188,7 +196,7 @@ impl<IO> http_codec::HttpCodec for Http1Codec<IO>
                             }
                         }
                         State::RequestInProgress(x) => {
-                            x.buffer = BytesMut::with_capacity(TRAFFIC_READ_CHUNK_SIZE);
+                            x.buffer = BytesMut::with_capacity(self.upload_buffer_size);
                             match self.upload_tx.send((!bytes.is_empty()).then(|| bytes.freeze())).await {
                                 Ok(_) => (),
                                 Err(_) => return Err(io::Error::from(ErrorKind::UnexpectedEof)),
@@ -256,6 +264,15 @@ impl http_codec::PendingRequest for StreamSource {
 impl http_codec::PendingRespond for StreamSink {
     fn id(&self) -> log_utils::IdChain<u64> {
         self.id.clone()
+    }
+
+    fn send_intermediate_response(&self, response: ResponseHeaders) -> io::Result<()> {
+        log_id!(debug, self.id, "Sending intermediate response: {:?}", response);
+
+        self.download_tx.try_send(Some(encode_response(response)))
+            .map_err(|e| io::Error::new(
+                ErrorKind::Other, format!("Failed to put response in queue: {}", e),
+            ))
     }
 
     fn send_response(self: Box<Self>, mut response: ResponseHeaders, eof: bool)

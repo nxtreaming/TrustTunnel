@@ -303,7 +303,7 @@ impl http_codec::DroppingSink for RespondStream {
 
 fn h2_to_io_error(e: h2::Error) -> io::Error {
     let reason = e.reason();
-    if reason.as_ref().map_or(false, |r| *r == Reason::NO_ERROR) {
+    if reason.as_ref().map_or(true, |r| *r == Reason::NO_ERROR) {
         return io::Error::from(ErrorKind::UnexpectedEof);
     }
 

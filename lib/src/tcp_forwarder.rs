@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::{Buf, Bytes};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::TcpStream;
 use crate::forwarder::TcpConnector;
@@ -24,6 +24,11 @@ struct StreamRx {
 
 struct StreamTx {
     tx: OwnedWriteHalf,
+    /// This is a workaround for the fact that half-closed connections are often not
+    /// supported in the wild. For example,
+    /// nginx https://mailman.nginx.org/pipermail/nginx/2008-September/007388.html, or
+    /// golang https://github.com/golang/go/issues/18527.
+    is_shut_down: bool,
     id: log_utils::IdChain<u64>,
 }
 
@@ -47,6 +52,7 @@ impl TcpForwarder {
             }),
             Box::new(StreamTx {
                 tx,
+                is_shut_down: false,
                 id,
             }),
         )
@@ -77,8 +83,12 @@ impl TcpConnector for TcpForwarder {
                 let mut status = None;
                 for a in resolved {
                     let ip = a.ip();
+                    if ip.is_ipv6() && !self.core_settings.ipv6_available {
+                        continue;
+                    }
+
                     if net_utils::is_global_ip(&ip)
-                        && !(ip.is_ipv6() && !self.core_settings.ipv6_available)
+                        || self.core_settings.allow_private_network_connections
                     {
                         status = Some(SelectionStatus::Suitable(a));
                         break;
@@ -147,6 +157,10 @@ impl pipe::Sink for StreamTx {
     }
 
     fn write(&mut self, mut data: Bytes) -> io::Result<Bytes> {
+        if self.is_shut_down {
+            return Err(io::Error::new(ErrorKind::Other, "Already shutdown".to_string()));
+        }
+
         while !data.is_empty() {
             match self.tx.try_write(data.as_ref()) {
                 Ok(n) => data.advance(n),
@@ -159,14 +173,15 @@ impl pipe::Sink for StreamTx {
     }
 
     fn eof(&mut self) -> io::Result<()> {
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.tx.shutdown().await
-            })
-        })
+        self.is_shut_down = true;
+        Ok(())
     }
 
     async fn wait_writable(&mut self) -> io::Result<()> {
+        if self.is_shut_down {
+            return Err(io::Error::new(ErrorKind::Other, "Already shutdown".to_string()));
+        }
+
         self.tx.writable().await
     }
 }

@@ -136,18 +136,19 @@ impl<F: Fn(SimplexDirection, usize) + Send> SimplexPipe<F> {
         loop {
             self.last_activity = Instant::now();
 
-            let future = match self.pending_chunk.take() {
-                None => async {
+            let future = async {
+                if self.pending_chunk.is_none() {
                     let x = self.source.read().await?;
                     log_dir!(trace, self.source.id(), self.direction, "TCP data: {}", x);
                     Ok(x)
-                }.boxed(),
-                Some(x) => async {
+                } else {
                     self.sink.wait_writable().await?;
-                    log_dir!(trace, self.sink.id(), self.direction, "Sending unsent");
-                    Ok(x)
-                }.boxed(),
-            };
+                    let pending = self.pending_chunk.take()
+                        .ok_or_else(|| io::Error::new(ErrorKind::Other, "Pending chunk is unexpectedly absent"))?;
+                    log_dir!(trace, self.sink.id(), self.direction, "Sending unsent: {}", pending);
+                    Ok(pending)
+                }
+            }.boxed();
 
             let data = tokio::time::timeout(timeout, future).await
                 .unwrap_or_else(|_| Err(io::Error::from(ErrorKind::TimedOut)))
@@ -239,5 +240,5 @@ impl<F: Fn(SimplexDirection, usize) + Send + Clone> DuplexPipe<F> {
 
 
 fn io_to_pipe_error<T>(id: T, io: io::Error) -> Error<T> {
-    Error { id, io, }
+    Error { id, io }
 }

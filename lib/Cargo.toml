@@ -18,7 +18,7 @@ quiche = { version = "0.14.0", features = ["qlog"] }
 ring = "0.16"
 lazy_static = "1.4"
 httparse = "1.7.1"
-rustls = { version = "0.20", features = ["logging"] }
+rustls = { version = "=0.20.7", features = ["logging"] }
 base64 = "0.13"
 libc = "0.2"
 tokio = { version = "1.20.1", features = ["net", "rt", "sync", "time", "macros", "rt-multi-thread"] }

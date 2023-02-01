@@ -104,6 +104,8 @@ The full set of settings is shown bellow in the pseudo-json format:
   },
   /// IPv6 availability
   "ipv6_available": Default(true),
+  /// Whether connections to private network of the endpoint are allowed
+  "allow_private_network_connections": Default(false),
   /// Time out of a TLS handshake
   "tls_handshake_timeout_secs": Default(10),
   /// Time out of a client listener

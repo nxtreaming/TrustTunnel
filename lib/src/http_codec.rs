@@ -94,6 +94,12 @@ pub(crate) trait PendingRespond: Send {
     /// Get the request ID for logging
     fn id(&self) -> log_utils::IdChain<u64>;
 
+    /// Send the intermediate response to a client. Unlike `send_response()`,
+    /// it does not change the pending state of the object.
+    fn send_intermediate_response(&self, _: ResponseHeaders) -> io::Result<()> {
+        Ok(())
+    }
+
     /// Send the response to a client
     fn send_response(self: Box<Self>, response: ResponseHeaders, eof: bool)
         -> io::Result<Box<dyn RespondedStreamSink>>;

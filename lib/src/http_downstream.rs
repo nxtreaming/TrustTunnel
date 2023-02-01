@@ -268,7 +268,10 @@ impl<D> datagram_pipe::Source for DatagramDecoder<D> {
         loop {
             let chunk = match self.pending_bytes.pop_front() {
                 None => match self.source.read().await? {
-                    pipe::Data::Chunk(bytes) => bytes,
+                    pipe::Data::Chunk(bytes) => {
+                        self.source.consume(bytes.len())?;
+                        bytes
+                    }
                     pipe::Data::Eof => return Err(io::Error::from(ErrorKind::UnexpectedEof)),
                 }
                 Some(bytes) => bytes,

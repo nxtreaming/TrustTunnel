@@ -80,6 +80,9 @@ pub struct Settings {
     /// IPv6 availability
     #[serde(default = "Settings::default_ipv6_available")]
     pub(crate) ipv6_available: bool,
+    /// Whether connections to private network of the endpoint are allowed
+    #[serde(default = "Settings::default_allow_private_network_connections")]
+    pub(crate) allow_private_network_connections: bool,
     /// Time out of a TLS handshake
     #[serde(default = "Settings::default_tls_handshake_timeout")]
     #[serde(rename(deserialize = "tls_handshake_timeout_secs"))]
@@ -260,7 +263,11 @@ pub struct MetricsSettings {
 }
 
 #[derive(Deserialize)]
-pub struct Http1Settings {}
+pub struct Http1Settings {
+    /// Buffer size for outgoing traffic
+    #[serde(default = "Http1Settings::default_upload_buffer_size")]
+    pub(crate) upload_buffer_size: usize,
+}
 
 #[derive(Deserialize)]
 pub struct Http2Settings {
@@ -461,6 +468,10 @@ impl Settings {
         true
     }
 
+    fn default_allow_private_network_connections() -> bool {
+        false
+    }
+
     fn default_tls_handshake_timeout() -> Duration {
         Duration::from_secs(10)
     }
@@ -489,6 +500,7 @@ impl Default for Settings {
             speed_tls_host_info: None,
             reverse_proxy: None,
             ipv6_available: false,
+            allow_private_network_connections: true,
             tls_handshake_timeout: Default::default(),
             client_listener_timeout: Default::default(),
             tcp_connections_timeout: Default::default(),
@@ -516,6 +528,10 @@ impl Socks5ForwarderSettings {
 impl Http1Settings {
     pub fn builder() -> Http1SettingsBuilder {
         Http1SettingsBuilder::new()
+    }
+
+    fn default_upload_buffer_size() -> usize {
+        return 32 * 1024;
     }
 }
 
@@ -669,6 +685,7 @@ impl SettingsBuilder {
                 speed_tls_host_info: None,
                 reverse_proxy: None,
                 ipv6_available: Settings::default_ipv6_available(),
+                allow_private_network_connections: Settings::default_allow_private_network_connections(),
                 tls_handshake_timeout: Settings::default_tls_handshake_timeout(),
                 client_listener_timeout: Settings::default_client_listener_timeout(),
                 tcp_connections_timeout: Settings::default_tcp_connections_timeout(),
@@ -743,6 +760,12 @@ impl SettingsBuilder {
     /// Set IPv6 availability
     pub fn ipv6_available(mut self, v: bool) -> Self {
         self.settings.ipv6_available = v;
+        self
+    }
+
+    /// Allow/disallow connections to private network of the endpoint
+    pub fn allow_private_network_connections(mut self, v: bool) -> Self {
+        self.settings.allow_private_network_connections = v;
         self
     }
 
@@ -833,7 +856,9 @@ impl Socks5ForwarderSettingsBuilder {
 impl Http1SettingsBuilder {
     fn new() -> Self {
         Self {
-            settings: Http1Settings {},
+            settings: Http1Settings {
+                upload_buffer_size: Http1Settings::default_upload_buffer_size(),
+            },
         }
     }
 

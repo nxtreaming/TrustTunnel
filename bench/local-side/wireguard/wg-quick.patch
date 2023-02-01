@@ -1,0 +1,24 @@
+--- orig.foo	2022-12-29 17:58:51.000000000 +0300
++++ 1.foo	2022-12-29 18:41:02.000000000 +0300
+@@ -325,10 +325,10 @@
+ 
+ cmd_up() {
+ 	local i
+-	[[ -z $(ip link show dev "$INTERFACE" 2>/dev/null) ]] || die "\`$INTERFACE' already exists"
++####	[[ -z $(ip link show dev "$INTERFACE" 2>/dev/null) ]] || die "\`$INTERFACE' already exists"
+ 	trap 'del_if; exit' INT TERM EXIT
+ 	execute_hooks "${PRE_UP[@]}"
+-	add_if
++####	add_if
+ 	set_config
+ 	for i in "${ADDRESSES[@]}"; do
+ 		add_addr "$i"
+@@ -346,7 +346,7 @@
+ 	[[ " $(wg show interfaces) " == *" $INTERFACE "* ]] || die "\`$INTERFACE' is not a WireGuard interface"
+ 	execute_hooks "${PRE_DOWN[@]}"
+ 	[[ $SAVE_CONFIG -eq 0 ]] || save_config
+-	del_if
++####	del_if
+ 	unset_dns || true
+ 	remove_firewall || true
+ 	execute_hooks "${POST_DOWN[@]}"

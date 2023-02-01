@@ -213,27 +213,12 @@ impl ForwardedStreamSource {
                 Ok(pipe::Data::Eof)
             }
             (pipe::Data::Chunk(bytes), BodyLength::Chunked) => {
-                let chunk_prefix = format!("{:x}\r\n", bytes.len());
-                let mut encoded = BytesMut::with_capacity(
-                    chunk_prefix.len() + bytes.len() + ENCODED_CHUNK_SUFFIX.len()
-                );
-                encoded.put(chunk_prefix.as_bytes());
-                encoded.extend_from_slice(&bytes);
-                encoded.put(ENCODED_CHUNK_SUFFIX.as_bytes());
                 state.sent_bytes += bytes.len() as u64;
-                self.skip_consume_bytes += chunk_prefix.len() + ENCODED_CHUNK_SUFFIX.len();
-                Ok(pipe::Data::Chunk(encoded.freeze()))
+                Ok(pipe::Data::Chunk(bytes))
             }
             (pipe::Data::Eof, BodyLength::Chunked) => {
-                const END_MESSAGE: &[u8] = b"0\r\n\r\n";
-                let data = if state.sent_bytes == 0 {
-                    pipe::Data::Eof
-                } else {
-                    self.skip_consume_bytes += END_MESSAGE.len();
-                    pipe::Data::Chunk(Bytes::from(END_MESSAGE))
-                };
                 self.state = SourceState::Done;
-                Ok(data)
+                Ok(pipe::Data::Eof)
             }
         }
     }
@@ -307,6 +292,11 @@ impl ForwardedStreamSink {
             (Some(x), tail) => (x, tail),
             (None, tail) => return Ok(tail),
         };
+
+        if (100..200).contains(&response.status.as_u16()) {
+            state.respond.send_intermediate_response(response)?;
+            return Ok(tail);
+        }
 
         let state = match std::mem::replace(&mut self.state, SinkState::Idle) {
             SinkState::WaitingResponse(x) => x,
@@ -650,6 +640,8 @@ fn serialize_request(request: &RequestHeaders) -> io::Result<(Bytes, BodyLength)
                     ("content-length", Some(BodyLength::Determined(_))) => return Err(io::Error::new(
                         ErrorKind::Other, "Request has multiple Content-Length headers"
                     )),
+                    ("transfer-encoding", _) if value == "chunked" =>
+                        body_length = Some(BodyLength::Chunked),
                     _ => (),
                 }
 
