@@ -1,8 +1,7 @@
-pub mod file_based;
+pub mod registry_based;
 
 
 use std::borrow::Cow;
-use async_trait::async_trait;
 use crate::log_utils;
 
 
@@ -23,28 +22,12 @@ pub enum Status {
     Pass,
     /// Failure
     Reject,
-    /// The authentication procedure should be done through forwarder
-    TryThroughForwarder(Source<'static>),
 }
 
 /// The authenticator abstract interface
-#[async_trait]
 pub trait Authenticator: Send + Sync {
     /// Authenticate client
-    async fn authenticate(&self, source: Source<'_>, log_id: &log_utils::IdChain<u64>) -> Status;
-}
-
-/// The [`Authenticator`] implementation which always delegates
-/// any authentication request to a [Forwarder](crate::forwarder::Forwarder).
-#[derive(Default)]
-pub struct RedirectToForwarderAuthenticator {
-}
-
-#[async_trait]
-impl Authenticator for RedirectToForwarderAuthenticator {
-    async fn authenticate(&self, source: Source<'_>, _log_id: &log_utils::IdChain<u64>) -> Status {
-        Status::TryThroughForwarder(source.into_owned())
-    }
+    fn authenticate(&self, source: &Source<'_>, log_id: &log_utils::IdChain<u64>) -> Status;
 }
 
 impl<'a> Source<'a> {

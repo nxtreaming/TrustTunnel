@@ -6,7 +6,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, UdpSocket};
 use crate::direct_forwarder::DirectForwarder;
 use crate::{authentication, http_ping_handler, http_speedtest_handler, log_id, log_utils, metrics, net_utils, reverse_proxy, settings, tls_demultiplexer, tunnel};
-use crate::authentication::RedirectToForwarderAuthenticator;
 use crate::tls_demultiplexer::TlsDemux;
 use crate::forwarder::Forwarder;
 use crate::http1_codec::Http1Codec;
@@ -51,7 +50,7 @@ pub(crate) struct Context {
 
 impl Core {
     pub fn new(
-        mut settings: Settings,
+        settings: Settings,
         tls_hosts_settings: settings::TlsHostsSettings,
         shutdown: Arc<Mutex<Shutdown>>,
     ) -> Result<Self, Error> {
@@ -60,12 +59,6 @@ impl Core {
         }
         if !tls_hosts_settings.is_built() {
             tls_hosts_settings.validate().map_err(Error::SettingsValidation)?;
-        }
-
-        if settings.authenticator.is_none()
-            && matches!(settings.forward_protocol, ForwardProtocolSettings::Socks5(_))
-        {
-            settings.authenticator = Some(Arc::new(RedirectToForwarderAuthenticator::default()));
         }
 
         let settings = Arc::new(settings);
@@ -399,17 +392,15 @@ impl Core {
 
         let authentication_policy = match context.settings.authenticator.as_ref().zip(sni_auth_creds) {
             None => tunnel::AuthenticationPolicy::Default,
-            Some((authenticator, credentials)) => match authenticator.authenticate(
-                authentication::Source::Sni(credentials.into()),
-                &tunnel_id,
-            ).await {
-                authentication::Status::Pass => tunnel::AuthenticationPolicy::Authenticated,
-                authentication::Status::Reject => {
-                    log_id!(debug, tunnel_id, "SNI authentication failed");
-                    return;
+            Some((authenticator, credentials)) => {
+                let auth = authentication::Source::Sni(credentials.into());
+                match authenticator.authenticate(&auth, &tunnel_id) {
+                    authentication::Status::Pass => tunnel::AuthenticationPolicy::Authenticated(auth),
+                    authentication::Status::Reject => {
+                        log_id!(debug, tunnel_id, "SNI authentication failed");
+                        return;
+                    }
                 }
-                authentication::Status::TryThroughForwarder(x) =>
-                    tunnel::AuthenticationPolicy::ThroughForwarder(x.clone()),
             }
         };
 

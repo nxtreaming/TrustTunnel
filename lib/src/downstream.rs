@@ -55,7 +55,7 @@ pub(crate) trait PendingMultiplexedRequest:
     + Send
 {
     /// Get the authorization info
-    fn auth_info(&self) -> io::Result<Option<authentication::Source>>;
+    fn auth_info(&self) -> io::Result<Option<authentication::Source<'_>>>;
 }
 
 pub(crate) enum PendingDemultiplexedRequest {

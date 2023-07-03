@@ -6,12 +6,11 @@ use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-
-use serde::Deserialize;
-
+use authentication::registry_based::RegistryBasedAuthenticator;
 use crate::authentication::Authenticator;
-use crate::authentication::file_based::FileBasedAuthenticator;
-use crate::utils;
+use crate::{authentication, utils};
+use serde::Deserialize;
+use toml_edit::{Document, Item};
 
 pub type Socks5BuilderResult<T> = Result<T, Socks5Error>;
 
@@ -101,10 +100,28 @@ pub struct Settings {
     /// The listener codec settings
     pub(crate) listen_protocols: ListenProtocolSettings,
     /// The client authenticator.
-    /// If this one is set to [`None`] and
-    /// [forward_protocol](Settings.forward_protocol) is set to [SOCKS5](ForwardProtocolSettings::Socks5),
-    /// the endpoint will try to authenticate requests using the SOCKS5 authentication protocol.
+    ///
+    /// If [forward_protocol](Settings.forward_protocol) is set to
+    /// [SOCKS5](ForwardProtocolSettings::Socks5), the endpoint will advertise authentication
+    /// to the SOCKS5 server even if the [`Settings::authenticator`] is [`None`].
+    ///
+    /// In case the [`Settings`] are deserialized from a file, the authenticator
+    /// is specified as the `credentials_file` field, which contains the path to the TOML
+    /// file in the form shown below, and the resulting type of the authenticator is
+    /// [`RegistryBasedAuthenticator`].
+    ///
+    /// The credentials file format:
+    ///
+    /// ```text
+    /// [[client]]
+    /// username = "a"
+    /// password = "b"
+    ///
+    /// [[client]]
+    /// ...
+    /// ```
     #[serde(default)]
+    #[serde(rename(deserialize = "credentials_file"))]
     #[serde(deserialize_with = "deserialize_authenticator")]
     pub(crate) authenticator: Option<Arc<dyn Authenticator>>,
     /// The ICMP forwarding settings.
@@ -215,20 +232,6 @@ pub struct ListenProtocolSettings {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthenticatorSettings {
-    /// Authenticate using [`FileBasedAuthenticator`]
-    File(FileBasedAuthenticatorSettings),
-}
-
-#[derive(Deserialize)]
-pub struct FileBasedAuthenticatorSettings {
-    /// A path to the file containing the authentication info
-    #[serde(deserialize_with = "deserialize_file_path")]
-    pub(crate) path: String,
-}
-
-#[derive(Deserialize)]
 pub struct IcmpSettings {
     /// The name of an interface to bind the ICMP socket to
     pub(crate) interface_name: String,
@@ -334,7 +337,6 @@ pub struct QuicSettings {
 
 pub struct SettingsBuilder {
     settings: Settings,
-    authenticator: Option<Box<dyn Authenticator>>,
 }
 
 pub struct TlsSettingsBuilder {
@@ -676,7 +678,6 @@ impl SettingsBuilder {
                 metrics: Default::default(),
                 built: true,
             },
-            authenticator: None,
         }
     }
 
@@ -760,7 +761,7 @@ impl SettingsBuilder {
 
     /// Set the client authenticator
     pub fn authenticator(mut self, x: Box<dyn Authenticator>) -> Self {
-        self.authenticator = Some(x);
+        self.settings.authenticator = Some(Arc::from(x));
         self
     }
 
@@ -1204,13 +1205,44 @@ fn deserialize_authenticator<'de, D>(deserializer: D) -> Result<Option<Arc<dyn A
     where
         D: serde::de::Deserializer<'de>,
 {
-    match AuthenticatorSettings::deserialize(deserializer)? {
-        AuthenticatorSettings::File(x) => Ok(Some(Arc::new(
-            FileBasedAuthenticator::new(&x.path)
-                .map_err(|e| serde::de::Error::invalid_value(
-                    serde::de::Unexpected::Other(&format!("authenticator initialization error: {}", e)),
-                    &"a file with valid authentication info",
-                ))?
-        ))),
+    let path = deserialize_file_path(deserializer)?;
+
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| serde::de::Error::invalid_value(
+            serde::de::Unexpected::Other(&format!("Couldn't read file: path={} error={}", path, e)),
+            &"A readable file",
+        ))?;
+
+    let clients: Document = content.parse()
+        .map_err(|e| serde::de::Error::invalid_value(
+            serde::de::Unexpected::Other(&format!("Couldn't parse file: path={} error={}", path, e)),
+            &"A TOML-formatted file",
+        ))?;
+
+    let mut clients = clients.get("client")
+        .and_then(Item::as_array_of_tables)
+        .ok_or(serde::de::Error::invalid_value(
+            serde::de::Unexpected::Other("Not an array of clients"),
+            &"An array of clients",
+        ))?
+        .iter()
+        .map(|x| (authentication::registry_based::Client {
+            username: demangle_toml_string(x["username"].to_string()),
+            password: demangle_toml_string(x["password"].to_string()),
+        }))
+        .peekable();
+    if clients.peek().is_none() {
+        return Err(serde::de::Error::invalid_value(
+            serde::de::Unexpected::Other("Empty client list"),
+            &"Non-empty client list",
+        ));
     }
+
+    Ok(Some(Arc::new(RegistryBasedAuthenticator::new(clients))))
+}
+
+fn demangle_toml_string(x: String) -> String {
+    x.replace('"', "")
+        .trim()
+        .to_string()
 }

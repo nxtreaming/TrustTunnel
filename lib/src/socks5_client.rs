@@ -3,6 +3,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use async_trait::async_trait;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use smallvec::{SmallVec, smallvec};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UdpSocket;
 use crate::net_utils;
@@ -28,6 +29,8 @@ const USERNAME_PASSWORD_AUTHENTICATION_VER: u8 = 0x01;
 const EXTENDED_AUTHENTICATION_TERM_TYPE_CODE: u8 = 0x00;
 const EXTENDED_AUTHENTICATION_TERM_VAL_LENGTH: u16 = 0x00;
 
+// smallvec does not allow bigger arrays
+type MaxStackSmallVec = SmallVec::<[u8; 512]>;
 
 #[derive(Debug)]
 pub(crate) enum Error {
@@ -291,14 +294,14 @@ trait SocksWriter: AsyncWriteExt + Sized + Unpin {
             return Err(Error::Protocol("Too many methods".to_string()));
         }
 
-        let mut buf = Vec::with_capacity(
+        let mut buf = SmallVec::<[u8; 32]>::with_capacity(
             std::mem::size_of_val(&PROTOCOL_VERSION)
                 + std::mem::size_of::<u8>()
                 + methods.len()
         );
 
-        buf.put_u8(PROTOCOL_VERSION);
-        buf.put_u8(methods.len() as u8);
+        buf.push(PROTOCOL_VERSION);
+        buf.push(methods.len() as u8);
         buf.extend(methods.iter().map(AuthenticationMethod::to_u8));
 
         self.write_all(&buf).await.map_err(Error::Io)
@@ -307,7 +310,7 @@ trait SocksWriter: AsyncWriteExt + Sized + Unpin {
     async fn write_authentication_message(&mut self, auth: &Authentication) -> Result<(), Error> {
         let buf = match auth {
             Authentication::UsernamePassword(username, password) => {
-                let mut buf = Vec::with_capacity(
+                let mut buf = MaxStackSmallVec::with_capacity(
                     std::mem::size_of_val(&USERNAME_PASSWORD_AUTHENTICATION_VER)
                         + std::mem::size_of::<u8>()
                         + username.len()
@@ -315,16 +318,16 @@ trait SocksWriter: AsyncWriteExt + Sized + Unpin {
                         + password.len()
                 );
 
-                buf.put_u8(USERNAME_PASSWORD_AUTHENTICATION_VER);
-                buf.put_u8(username.len() as u8);
-                buf.put_slice(username.as_bytes());
-                buf.put_u8(password.len() as u8);
-                buf.put_slice(password.as_bytes());
+                buf.push(USERNAME_PASSWORD_AUTHENTICATION_VER);
+                buf.push(username.len() as u8);
+                buf.extend_from_slice(username.as_bytes());
+                buf.push(password.len() as u8);
+                buf.extend_from_slice(password.as_bytes());
 
                 buf
             }
             Authentication::Extended(values) => {
-                let mut buf = vec![USERNAME_PASSWORD_AUTHENTICATION_VER];
+                let mut buf: MaxStackSmallVec = smallvec![USERNAME_PASSWORD_AUTHENTICATION_VER];
 
                 for value in values {
                     write_extended_authentication_value(&mut buf, value)?;
@@ -339,38 +342,38 @@ trait SocksWriter: AsyncWriteExt + Sized + Unpin {
     }
 
     async fn write_request(&mut self, command: u8, destination: &Address<'_>, port: u16)
-        -> Result<(), Error>
+                           -> Result<(), Error>
     {
-        let mut buf = Vec::with_capacity(
+        let mut buf = MaxStackSmallVec::with_capacity(
             std::mem::size_of_val(&PROTOCOL_VERSION)
                 + std::mem::size_of_val(&command)
                 + std::mem::size_of_val(&RESERVED)
                 + std::mem::size_of_val(&destination.address_type())
                 + match destination {
-                    Address::IpAddress(IpAddr::V4(_)) => net_utils::IPV4_WIRE_LENGTH,
-                    Address::IpAddress(IpAddr::V6(_)) => net_utils::IPV6_WIRE_LENGTH,
-                    Address::DomainName(x) =>
-                        std::mem::size_of::<u8>() + x.len().min(MAX_DOMAIN_NAME_LENGTH),
-                }
+                Address::IpAddress(IpAddr::V4(_)) => net_utils::IPV4_WIRE_LENGTH,
+                Address::IpAddress(IpAddr::V6(_)) => net_utils::IPV6_WIRE_LENGTH,
+                Address::DomainName(x) =>
+                    std::mem::size_of::<u8>() + x.len().min(MAX_DOMAIN_NAME_LENGTH),
+            }
                 + std::mem::size_of_val(&port)
         );
 
-        buf.put_u8(PROTOCOL_VERSION);
-        buf.put_u8(command);
-        buf.put_u8(RESERVED);
+        buf.push(PROTOCOL_VERSION);
+        buf.push(command);
+        buf.push(RESERVED);
 
-        buf.put_u8(destination.address_type());
+        buf.push(destination.address_type());
         match destination {
-            Address::IpAddress(IpAddr::V4(x)) => buf.put_slice(&x.octets()),
-            Address::IpAddress(IpAddr::V6(x)) => buf.put_slice(&x.octets()),
+            Address::IpAddress(IpAddr::V4(x)) => buf.extend_from_slice(&x.octets()),
+            Address::IpAddress(IpAddr::V6(x)) => buf.extend_from_slice(&x.octets()),
             Address::DomainName(x) if x.len() <= MAX_DOMAIN_NAME_LENGTH => {
-                buf.put_u8(x.len() as u8);
-                buf.put_slice(x.as_bytes());
+                buf.push(x.len() as u8);
+                buf.extend_from_slice(x.as_bytes());
             }
             Address::DomainName(_) => return Err(Error::Protocol("Too long domain name".to_string())),
         }
 
-        buf.put_u16(port);
+        put_u16(&mut buf, port);
 
         self.write_all(&buf).await.map_err(Error::Io)
     }
@@ -490,7 +493,7 @@ async fn connect_inner<IO>(
         => {
             io.write_authentication_message(auth.as_ref().unwrap()).await?;
             io.read_authentication_response().await?;
-        },
+        }
         (AuthenticationMethod::NoAcceptable, _) => return Err(
             Error::Authentication("Server rejected offered authentication methods".to_string())
         ),
@@ -604,7 +607,7 @@ impl<S> UdpAssociation<S> {
                 let mut addr_octets = [0; net_utils::IPV6_WIRE_LENGTH];
                 buf.copy_to_slice(&mut addr_octets);
                 IpAddr::from(addr_octets)
-            },
+            }
             x => return Err(Error::Protocol(format!("Unexpected address type: {}", x))),
         };
 
@@ -630,10 +633,14 @@ const fn udp_buffer_size(address_size: usize, data_cap: usize) -> usize {
         + data_cap
 }
 
-fn write_extended_authentication_value(buf: &mut impl BufMut, value: &ExtendedAuthenticationValue)
+fn write_extended_authentication_value<A>(
+    buf: &mut SmallVec<A>, value: &ExtendedAuthenticationValue,
+)
     -> Result<(), Error>
+    where
+        A: smallvec::Array<Item=u8>,
 {
-    buf.put_u8(value.type_code());
+    buf.push(value.type_code());
 
     match value {
         ExtendedAuthenticationValue::Domain(x) => {
@@ -641,17 +648,17 @@ fn write_extended_authentication_value(buf: &mut impl BufMut, value: &ExtendedAu
                 return Err(Error::Protocol("Too long domain name".to_string()));
             }
 
-            buf.put_u16(x.len() as u16);
-            buf.put_slice(x.as_bytes());
+            put_u16(buf, x.len() as u16);
+            buf.extend_from_slice(x.as_bytes());
         }
         ExtendedAuthenticationValue::ClientAddress(x) => match x {
             IpAddr::V4(x) => {
-                buf.put_u16(net_utils::IPV4_WIRE_LENGTH as u16);
-                buf.put_slice(&x.octets());
+                put_u16(buf, net_utils::IPV4_WIRE_LENGTH as u16);
+                buf.extend_from_slice(&x.octets());
             }
             IpAddr::V6(x) => {
-                buf.put_u16(net_utils::IPV6_WIRE_LENGTH as u16);
-                buf.put_slice(&x.octets());
+                put_u16(buf, net_utils::IPV6_WIRE_LENGTH as u16);
+                buf.extend_from_slice(&x.octets());
             }
         }
         ExtendedAuthenticationValue::UserAgent(x) => {
@@ -659,27 +666,37 @@ fn write_extended_authentication_value(buf: &mut impl BufMut, value: &ExtendedAu
                 return Err(Error::Protocol("Too long User-Agent".to_string()));
             }
 
-            buf.put_u16(x.len() as u16);
-            buf.put_slice(x.as_bytes());
+            put_u16(buf, x.len() as u16);
+            buf.extend_from_slice(x.as_bytes());
         }
         ExtendedAuthenticationValue::BasicProxyAuth(x) => {
             if x.len() > u16::MAX as usize {
                 return Err(Error::Protocol("Too long Proxy-Authorization".to_string()));
             }
 
-            buf.put_u16(x.len() as u16);
-            buf.put_slice(x.as_bytes());
+            put_u16(buf, x.len() as u16);
+            buf.extend_from_slice(x.as_bytes());
         }
         ExtendedAuthenticationValue::SniAuth => {
-            buf.put_u16(0_u16);
+            put_u16(buf, 0_u16);
         }
     }
 
     Ok(())
 }
 
-fn write_extended_authentication_term_value(buf: &mut impl BufMut) -> Result<(), Error> {
-    buf.put_u8(EXTENDED_AUTHENTICATION_TERM_TYPE_CODE);
-    buf.put_u16(EXTENDED_AUTHENTICATION_TERM_VAL_LENGTH);
+fn write_extended_authentication_term_value<A>(buf: &mut SmallVec<A>) -> Result<(), Error>
+    where
+        A: smallvec::Array<Item=u8>,
+{
+    buf.push(EXTENDED_AUTHENTICATION_TERM_TYPE_CODE);
+    put_u16(buf, EXTENDED_AUTHENTICATION_TERM_VAL_LENGTH);
     Ok(())
+}
+
+fn put_u16<A>(buf: &mut SmallVec<A>, x: u16)
+    where
+        A: smallvec::Array<Item=u8>,
+{
+    buf.extend_from_slice(&x.to_ne_bytes())
 }

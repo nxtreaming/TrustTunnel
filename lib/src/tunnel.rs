@@ -13,10 +13,9 @@ use crate::pipe::DuplexPipe;
 pub(crate) enum AuthenticationPolicy<'this> {
     /// Perform the regular authentication procedure through the configured authenticator
     Default,
-    /// The whole connection is authenticated, perform authentication only if requested
-    Authenticated,
-    /// Pass the provided authentication info to the forwarder with each request
-    ThroughForwarder(authentication::Source<'this>),
+    /// The whole connection is authenticated.
+    /// Contains the authenticated info.
+    Authenticated(authentication::Source<'this>),
 }
 
 pub(crate) struct Tunnel {
@@ -117,42 +116,42 @@ impl Tunnel {
 
             tokio::spawn(async move {
                 let request_id = request.id();
-                let forwarder_auth = match context.settings.authenticator.clone() {
-                    None => None,
-                    Some(authenticator) => match authentication_policy {
-                        AuthenticationPolicy::Default => {
-                            let auth_info = request.auth_info();
-                            match auth_info {
-                                Ok(Some(source)) =>
-                                    match authenticator.authenticate(source, &log_id).await {
-                                        Status::Pass => None,
-                                        Status::Reject => {
-                                            let err = ConnectionError::Authentication(
-                                                "Authentication failed".to_string()
-                                            );
-                                            log_id!(debug, request_id, "{}", err);
-                                            request.fail_request(err);
-                                            return;
-                                        }
-                                        Status::TryThroughForwarder(x) => Some(x),
-                                    },
-                                Ok(None) => {
-                                    let err = ConnectionError::Authentication(
-                                        "Got request without authentication info on non-authenticated connection".to_string()
-                                    );
-                                    log_id!(debug, request_id, "{}", err);
-                                    request.fail_request(err);
-                                    return;
-                                }
-                                Err(e) => {
-                                    log_id!(debug, request_id, "Failed to get auth info: {}", e);
-                                    request.fail_request(ConnectionError::Io(e));
-                                    return;
-                                }
+                let auth_info = request.auth_info().map(|x| x.map(authentication::Source::into_owned));
+                let forwarder_auth = match (
+                    auth_info,
+                    authentication_policy,
+                    context.settings.authenticator.clone(),
+                ) {
+                    (Ok(Some(source)), _, Some(authenticator)) =>
+                        match authenticator.authenticate(&source, &log_id) {
+                            Status::Pass => Some(source),
+                            Status::Reject => {
+                                let err = ConnectionError::Authentication(
+                                    "Authentication failed".to_string()
+                                );
+                                log_id!(debug, request_id, "{}", err);
+                                request.fail_request(err);
+                                return;
                             }
-                        }
-                        AuthenticationPolicy::Authenticated => None,
-                        AuthenticationPolicy::ThroughForwarder(x) => Some(x),
+                        },
+                    (Ok(None), AuthenticationPolicy::Authenticated(x), Some(_)) => Some(x),
+                    (Ok(x), policy, None) =>
+                        x.or(match policy {
+                            AuthenticationPolicy::Default => None,
+                            AuthenticationPolicy::Authenticated(y) => Some(y),
+                        }),
+                    (Ok(None), AuthenticationPolicy::Default, Some(_)) => {
+                        let err = ConnectionError::Authentication(
+                            "Got request without authentication info on non-authenticated connection".to_string()
+                        );
+                        log_id!(debug, request_id, "{}", err);
+                        request.fail_request(err);
+                        return;
+                    }
+                    (Err(e), ..) => {
+                        log_id!(debug, request_id, "Failed to get auth info: {}", e);
+                        request.fail_request(ConnectionError::Io(e));
+                        return;
                     }
                 };
 

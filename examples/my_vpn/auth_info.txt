@@ -1,3 +1,7 @@
-applicationId: empty
-token: premium
-credentials: premium
+[[client]]
+username = "premium"
+password = "premium"
+
+[[client]]
+username = "free"
+password = "free"

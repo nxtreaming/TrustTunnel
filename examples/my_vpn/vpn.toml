@@ -30,6 +30,20 @@ tcp_connections_timeout_secs = 604800
 # Default is 300s.
 udp_connections_timeout_secs = 300
 
+# (Optional) The registry of client credentials.
+# Must be TOML-formatted and contain an array of clients:
+#   [[client]]
+#   username = "a name"
+#   password = "a password"
+#   [[client]]
+#   ...
+#
+# If this one is omitted:
+#   * if `forward_protocol` is set to `socks5`, the endpoint will try to authenticate
+#     requests using the SOCKS5 authentication protocol,
+#   * otherwise, any client is welcome.
+credentials_file = "auth_info.txt"
+
 # (Required) The set of connection forwarder settings.
 # Possible values:
 #   * direct: a direct forwarder routes a connection directly to its target host,
@@ -127,40 +141,6 @@ enable_early_data = true
 # Increasing it may lead to high memory consumption.
 # Default is 4K.
 message_queue_capacity = 4096
-
-# (Optional) The client authenticator.
-# Possible values:
-#   * <none>: any client is welcome,
-#   * file: use a file with credentials for authentication,
-#   * radius: ask a radius server for authentication.
-# Default is <none>.
-# If this one is omitted and `forward_protocol` is set to `socks5`,
-# the endpoint will try to authenticate requests using the SOCKS5 authentication protocol.
-#[authenticator]
-
-# The set of file-based authenticator settings.
-#[authenticator.file]
-## (Required) Path to the credentials file.
-## The file must contain an application id (`applicationId: <string>`),
-## token (`token: <string>`), and credentials (`credentials: <string>`).
-## Each one must be on a new line. The order does not matter.
-#path = "auth_info.txt"
-
-# The set of RADIUS authenticator settings.
-#[authenticator.radius]
-## (Required) The RADIUS server address.
-#server_address = "127.0.0.1:1813"
-## Timeout of the authentication procedure in seconds.
-## Default is 3s.
-#timeout_secs = 3
-## (Required) The password shared between the client and the RADIUS server.
-#secret = "String"
-## The authentication cache capacity.
-## Default is 1024.
-#cache_size = 1024
-## The authentication cache entry TTL in seconds.
-## Default is 10s.
-#cache_ttl_secs = 10
 
 # (Optional) The reverse proxy settings.
 # With this one set up the endpoint does TLS termination on matching connections and
