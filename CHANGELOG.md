@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 0.9.61
+
 * Removed old docker image
 * Added new [docker image](Dockerfile) with improved build and run logic
 
