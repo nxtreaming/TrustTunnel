@@ -120,12 +120,12 @@ async fn run_endpoint(listen_address: &SocketAddr, with_auth: bool, socks_proxy:
         .allow_private_network_connections(true);
 
     if with_auth {
-        builder = builder.authenticator(Box::new(RegistryBasedAuthenticator::new(std::iter::once(
+        builder = builder.clients(Vec::from_iter(std::iter::once(
             authentication::registry_based::Client {
                 username: "a".into(),
                 password: "b".into(),
             }
-        ))));
+        )));
     }
 
     if let Some(address) = socks_proxy {

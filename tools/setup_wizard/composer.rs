@@ -1,9 +1,8 @@
 use std::iter::once;
 use toml_edit::{Document, value};
 use vpn_libs_endpoint::settings::{ForwardProtocolSettings, Http1Settings, Http2Settings, IcmpSettings, ListenProtocolSettings, MetricsSettings, QuicSettings, Settings};
-use vpn_libs_endpoint::utils::IterJoin;
+use vpn_libs_endpoint::utils::{IterJoin, ToTomlComment};
 use crate::template_settings;
-use crate::template_settings::ToTomlComment;
 
 pub fn compose_document(settings: &Settings, credentials_path: &str) -> String {
     once(compose_main_table(settings, credentials_path))

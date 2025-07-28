@@ -40,6 +40,7 @@ pub struct Core {
 
 pub(crate) struct Context {
     pub settings: Arc<Settings>,
+    pub authenticator: Option<Arc<dyn authentication::Authenticator>>,
     tls_demux: Arc<RwLock<TlsDemux>>,
     pub icmp_forwarder: Option<Arc<IcmpForwarder>>,
     pub shutdown: Arc<Mutex<Shutdown>>,
@@ -51,6 +52,7 @@ pub(crate) struct Context {
 impl Core {
     pub fn new(
         settings: Settings,
+        authenticator: Option<Arc<dyn authentication::Authenticator>>,
         tls_hosts_settings: settings::TlsHostsSettings,
         shutdown: Arc<Mutex<Shutdown>>,
     ) -> Result<Self, Error> {
@@ -66,6 +68,7 @@ impl Core {
         Ok(Self {
             context: Arc::new(Context {
                 settings: settings.clone(),
+                authenticator,
                 tls_demux: Arc::new(RwLock::new(
                     TlsDemux::new(&settings, &tls_hosts_settings)
                         .map_err(|e| Error::TlsDemultiplexer(e.to_string()))?
@@ -390,7 +393,7 @@ impl Core {
     ) {
         let _metrics_guard = Metrics::client_sessions_counter(context.metrics.clone(), protocol);
 
-        let authentication_policy = match context.settings.authenticator.as_ref().zip(sni_auth_creds) {
+        let authentication_policy = match context.authenticator.as_ref().zip(sni_auth_creds) {
             None => tunnel::AuthenticationPolicy::Default,
             Some((authenticator, credentials)) => {
                 let auth = authentication::Source::Sni(credentials.into());
@@ -458,6 +461,7 @@ impl Default for Context {
         let settings = Arc::new(Settings::default());
         Self {
             settings: settings.clone(),
+            authenticator: None,
             tls_demux: Arc::new(RwLock::new(
                 TlsDemux::new(&settings, &settings::TlsHostsSettings::default()).unwrap()
             )),

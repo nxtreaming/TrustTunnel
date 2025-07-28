@@ -112,6 +112,27 @@ impl<I, T> IterJoin for I
     }
 }
 
+pub trait ToTomlComment {
+    /// Prepend each line of string with "# " turning
+    /// the whole string it into TOML comment.
+    fn to_toml_comment(&self) -> String;
+}
+
+impl ToTomlComment for &str {
+    fn to_toml_comment(&self) -> String {
+        self.lines()
+            .map(|x| format!("# {x}"))
+            .join("\n")
+    }
+}
+
+impl ToTomlComment for String {
+    fn to_toml_comment(&self) -> String {
+        self.as_str().to_toml_comment()
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use crate::utils::IterJoin;

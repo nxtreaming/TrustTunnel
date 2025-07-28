@@ -20,6 +20,7 @@ use rustls::client::ServerCertVerified;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UdpSocket};
 use tokio_rustls::TlsConnector;
+use vpn_libs_endpoint::authentication::{Authenticator, registry_based::RegistryBasedAuthenticator};
 use vpn_libs_endpoint::core::Core;
 use vpn_libs_endpoint::log_utils;
 use vpn_libs_endpoint::settings::{Http1Settings, Http2Settings, ListenProtocolSettings, QuicSettings, Settings, TlsHostInfo, TlsHostsSettings};
@@ -219,8 +220,13 @@ pub async fn run_endpoint(listen_address: &SocketAddr) {
 
 pub async fn run_endpoint_with_settings(settings: Settings, hosts_settings: TlsHostsSettings) {
     let shutdown = Shutdown::new();
+    let authenticator: Option<Arc<dyn Authenticator>> = if !settings.get_clients().is_empty() {
+        Some(Arc::new(RegistryBasedAuthenticator::new(settings.get_clients())))
+    } else {
+        None
+    };
 
-    let endpoint = Core::new(settings, hosts_settings, shutdown).unwrap();
+    let endpoint = Core::new(settings, authenticator, hosts_settings, shutdown).unwrap();
     endpoint.listen().await.unwrap();
 }
 

@@ -1,10 +1,14 @@
 use std::sync::Arc;
 use log::{error, info, LevelFilter};
 use tokio::signal;
+use vpn_libs_endpoint::authentication::registry_based::RegistryBasedAuthenticator;
+use vpn_libs_endpoint::authentication::Authenticator;
 use vpn_libs_endpoint::core::Core;
 use vpn_libs_endpoint::{log_utils, settings};
 use vpn_libs_endpoint::settings::Settings;
 use vpn_libs_endpoint::shutdown::Shutdown;
+use vpn_libs_endpoint::client_config;
+
 
 const VERSION_STRING: &str = env!("CARGO_PKG_VERSION");
 
@@ -13,6 +17,8 @@ const LOG_LEVEL_PARAM_NAME: &str = "log_level";
 const LOG_FILE_PARAM_NAME: &str = "log_file";
 const SETTINGS_PARAM_NAME: &str = "settings";
 const TLS_HOSTS_SETTINGS_PARAM_NAME: &str = "tls_hosts_settings";
+const CLIENT_CONFIG_PARAM_NAME: &str = "client_config";
+const ADDRESS_PARAM_NAME: &str = "address";
 const SENTRY_DSN_PARAM_NAME: &str = "sentry_dsn";
 const THREADS_NUM_PARAM_NAME: &str = "threads_num";
 
@@ -56,6 +62,19 @@ fn main() {
                 .action(clap::ArgAction::Set)
                 .required_unless_present(VERSION_PARAM_NAME)
                 .help("Path to a file containing TLS hosts settings. Sending SIGHUP to the process causes reloading the settings."),
+            clap::Arg::new(CLIENT_CONFIG_PARAM_NAME)
+                .action(clap::ArgAction::Set)
+                .requires(ADDRESS_PARAM_NAME)
+                .short('c')
+                .long("client_config")
+                .value_names(["client_name"])
+                .help("Print the endpoint config for specified client and exit."),
+            clap::Arg::new(ADDRESS_PARAM_NAME)
+                .action(clap::ArgAction::Append)
+                .requires(CLIENT_CONFIG_PARAM_NAME)
+                .short('a')
+                .long("address")
+                .help("Endpoint address to be added to client's config.")
         ])
         .disable_version_flag(true)
         .get_matches();
@@ -105,6 +124,18 @@ fn main() {
             .expect("Couldn't read the TLS hosts settings file")
     ).expect("Couldn't parse the TLS hosts settings file");
 
+    if args.contains_id(CLIENT_CONFIG_PARAM_NAME) {
+        let username = args.get_one::<String>(CLIENT_CONFIG_PARAM_NAME).unwrap();
+        let addresses: Vec<String> = args.get_many::<String>(ADDRESS_PARAM_NAME)
+            .map(Iterator::cloned)
+            .map(Iterator::collect)
+            .expect("Addresses should be specified");
+
+        let client_config = client_config::build(&username, &addresses, settings.get_clients(), &tls_hosts_settings);
+        println!("{}", client_config.compose_toml());
+        return;
+    }
+
     let rt = {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         builder.enable_io();
@@ -119,8 +150,13 @@ fn main() {
     };
 
     let shutdown = Shutdown::new();
+    let authenticator: Option<Arc<dyn Authenticator>> = if !settings.get_clients().is_empty() {
+        Some(Arc::new(RegistryBasedAuthenticator::new(settings.get_clients())))
+    } else {
+        None
+    };
     let core = Arc::new(Core::new(
-        settings, tls_hosts_settings, shutdown.clone(),
+        settings, authenticator, tls_hosts_settings, shutdown.clone(),
     ).expect("Couldn't create core instance"));
 
     let listen_task = {

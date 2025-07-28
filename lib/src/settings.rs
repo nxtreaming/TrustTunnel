@@ -4,15 +4,13 @@ use std::io;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 use std::path::Path;
-use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(feature = "rt_doc")]
 use macros::{Getter, RuntimeDoc};
 use serde::{Deserialize, Serialize};
 use toml_edit::{Document, Item};
-use authentication::registry_based::RegistryBasedAuthenticator;
-use crate::authentication::Authenticator;
+use authentication::registry_based::Client;
 use crate::{authentication, utils};
 
 pub type Socks5BuilderResult<T> = Result<T, Socks5Error>;
@@ -101,6 +99,7 @@ pub struct Settings {
     pub(crate) forward_protocol: ForwardProtocolSettings,
     /// The set of enabled client listener codecs
     pub(crate) listen_protocols: ListenProtocolSettings,
+    // TODO (ayakushin): fix docs
     /// The client authenticator.
     ///
     /// If [forward_protocol](Settings.forward_protocol) is set to
@@ -125,8 +124,8 @@ pub struct Settings {
     #[serde(default)]
     #[serde(skip_serializing)]
     #[serde(rename(deserialize = "credentials_file"))]
-    #[serde(deserialize_with = "deserialize_authenticator")]
-    pub(crate) authenticator: Option<Arc<dyn Authenticator>>,
+    #[serde(deserialize_with = "deserialize_clients")]
+    pub(crate) clients: Vec<Client>,
     /// The reverse proxy settings.
     /// With this one set up the endpoint does TLS termination on such connections and
     /// translates HTTP/x traffic into HTTP/1.1 protocol towards the server and back
@@ -488,12 +487,12 @@ impl Default for Settings {
             tcp_connections_timeout: Settings::default_tcp_connections_timeout(),
             udp_connections_timeout: Settings::default_udp_connections_timeout(),
             forward_protocol: Default::default(),
+            clients: Default::default(),
             listen_protocols: ListenProtocolSettings {
                 http1: Some(Http1Settings::builder().build()),
                 http2: Some(Http2Settings::builder().build()),
                 quic: Some(QuicSettings::builder().build()),
             },
-            authenticator: None,
             reverse_proxy: None,
             icmp: None,
             metrics: Default::default(),
@@ -729,7 +728,7 @@ impl SettingsBuilder {
                 udp_connections_timeout: Settings::default_udp_connections_timeout(),
                 forward_protocol: Default::default(),
                 listen_protocols: Default::default(),
-                authenticator: None,
+                clients: Default::default(),
                 reverse_proxy: None,
                 icmp: None,
                 metrics: Default::default(),
@@ -824,8 +823,8 @@ impl SettingsBuilder {
     }
 
     /// Set the client authenticator
-    pub fn authenticator(mut self, x: Box<dyn Authenticator>) -> Self {
-        self.settings.authenticator = Some(Arc::from(x));
+    pub fn clients(mut self, x: Vec<Client>) -> Self {
+        self.settings.clients = x;
         self
     }
 
@@ -1279,7 +1278,7 @@ fn deserialize_file_path<'de, D>(deserializer: D) -> Result<String, D::Error>
     deserializer.deserialize_str(Visitor)
 }
 
-fn deserialize_authenticator<'de, D>(deserializer: D) -> Result<Option<Arc<dyn Authenticator>>, D::Error>
+fn deserialize_clients<'de, D>(deserializer: D) -> Result<Vec<Client>, D::Error>
     where
         D: serde::de::Deserializer<'de>,
 {
@@ -1297,26 +1296,19 @@ fn deserialize_authenticator<'de, D>(deserializer: D) -> Result<Option<Arc<dyn A
             &"A TOML-formatted file",
         ))?;
 
-    let mut clients = clients.get("client")
+    let res = clients.get("client")
         .and_then(Item::as_array_of_tables)
         .ok_or(serde::de::Error::invalid_value(
             serde::de::Unexpected::Other("Not an array of clients"),
             &"An array of clients",
         ))?
         .iter()
-        .map(|x| (authentication::registry_based::Client {
+        .map(|x| (Client {
             username: demangle_toml_string(x["username"].to_string()),
             password: demangle_toml_string(x["password"].to_string()),
-        }))
-        .peekable();
-    if clients.peek().is_none() {
-        return Err(serde::de::Error::invalid_value(
-            serde::de::Unexpected::Other("Empty client list"),
-            &"Non-empty client list",
-        ));
-    }
+        })).collect();
 
-    Ok(Some(Arc::new(RegistryBasedAuthenticator::new(clients))))
+    Ok(res)
 }
 
 fn demangle_toml_string(x: String) -> String {

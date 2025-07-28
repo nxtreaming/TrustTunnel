@@ -23,11 +23,10 @@ pub struct RegistryBasedAuthenticator {
 }
 
 impl RegistryBasedAuthenticator {
-    pub fn new<I>(clients: I) -> Self
-        where I: Iterator<Item=Client>
+    pub fn new(clients: &Vec<Client>) -> Self
     {
         Self {
-            clients: clients
+            clients: clients.iter()
                 .map(|x| BASE64_ENGINE.encode(format!("{}:{}", x.username, x.password)))
                 .map(Cow::Owned)
                 .collect(),

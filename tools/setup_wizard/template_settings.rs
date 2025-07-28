@@ -1,26 +1,6 @@
 use once_cell::sync::Lazy;
 use vpn_libs_endpoint::settings::{ForwardProtocolSettings, Http1Settings, Http2Settings, IcmpSettings, ListenProtocolSettings, MetricsSettings, QuicSettings, Settings, Socks5ForwarderSettings};
-use vpn_libs_endpoint::utils::IterJoin;
-
-pub trait ToTomlComment {
-    /// Prepend each line of string with "# " turning
-    /// the whole string it into TOML comment.
-    fn to_toml_comment(&self) -> String;
-}
-
-impl ToTomlComment for &str {
-    fn to_toml_comment(&self) -> String {
-        self.lines()
-            .map(|x| format!("# {x}"))
-            .join("\n")
-    }
-}
-
-impl ToTomlComment for String {
-    fn to_toml_comment(&self) -> String {
-        self.as_str().to_toml_comment()
-    }
-}
+use vpn_libs_endpoint::utils::ToTomlComment;
 
 pub static MAIN_TABLE: Lazy<String> = Lazy::new(|| format!(
     r#"{}
