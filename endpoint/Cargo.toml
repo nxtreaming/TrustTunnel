@@ -1,6 +1,6 @@
 [package]
 name = "vpn_endpoint"
-version = "0.9.63"
+version = "0.9.64"
 authors = ["Sergei Gunchenko <s.gunchenko@adguard.com>"]
 edition = "2021"
 
