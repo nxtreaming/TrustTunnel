@@ -2662,6 +2662,7 @@ dependencies = [
  "hex",
  "ipnet",
  "lazy_static",
+ "log",
  "once_cell",
  "rcgen",
  "serde",

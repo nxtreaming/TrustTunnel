@@ -30,6 +30,10 @@ credentials_file = "{}"
 # action = "deny"
 #
 # [[rule]]
+# client_random_prefix = "a0b0/f0f0"  # Format: prefix[/mask] for bitwise matching
+# action = "allow"
+#
+# [[rule]]
 # action = "deny"
 #
 # If no rules in this file, all connections are allowed by default.

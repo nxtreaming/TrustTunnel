@@ -137,10 +137,21 @@ fn generate_rules_toml_content(rules_config: &vpn_libs_endpoint::rules::RulesCon
     content.push_str("# Each rule can specify:\n");
     content.push_str("# - cidr: IP address range in CIDR notation\n");
     content.push_str("# - client_random_prefix: Hex-encoded prefix of TLS client random data\n");
+    content.push_str("#   Can optionally include a mask in format \"prefix[/mask]\" for bitwise matching\n");
     content.push_str("# - action: \"allow\" or \"deny\"\n");
     content.push_str("#\n");
-    content.push_str("# Both cidr and client_random_prefix are optional - if specified, both must match for the rule to apply.\n");
-    content.push_str("# If only one is specified, only that condition needs to match.\n\n");
+    content.push_str("# All fields except 'action' are optional - if specified, all conditions must match for the rule to apply.\n");
+    content.push_str("#\n");
+    content.push_str("# client_random_prefix formats:\n");
+    content.push_str("# 1. Simple prefix matching:\n");
+    content.push_str("#    client_random_prefix = \"aabbcc\"\n");
+    content.push_str("#    → matches client_random starting with 0xaabbcc\n");
+    content.push_str("#\n");
+    content.push_str("# 2. Bitwise matching with mask:\n");
+    content.push_str("#    client_random_prefix = \"a0b0/f0f0\"\n");
+    content.push_str("#    → prefix=a0b0, mask=f0f0\n");
+    content.push_str("#    → matches client_random where (client_random & 0xf0f0) == (0xa0b0 & 0xf0f0)\n");
+    content.push_str("#    → e.g., 0xa5b5, 0xa9bf match, but 0xb0b0, 0xa0c0 don't match\n\n");
     
     // Serialize the actual rules (usually empty)
     if !rules_config.rule.is_empty() {

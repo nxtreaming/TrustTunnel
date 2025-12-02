@@ -1,6 +1,7 @@
 use vpn_libs_endpoint::rules::{Rule, RuleAction, RulesConfig};
 use crate::user_interaction::{ask_for_agreement, ask_for_input};
 use crate::get_mode;
+use log::{info, warn};
 
 pub fn build() -> RulesConfig {
     match get_mode() {
@@ -16,13 +17,13 @@ fn build_non_interactive() -> RulesConfig {
 }
 
 fn build_interactive() -> RulesConfig {
-    println!("Setting up connection filtering rules...");
+    info!("Setting up connection filtering rules...");
     
     let mut rules = Vec::new();
     
     // Ask if user wants to configure rules
     if !ask_for_agreement("Do you want to configure connection filtering rules? (if not, all connections will be allowed)") {
-        println!("Skipping rules configuration - all connections will be allowed.");
+        info!("Skipping rules configuration - all connections will be allowed.");
         return RulesConfig { rule: vec![] };
     }
     
@@ -30,6 +31,7 @@ fn build_interactive() -> RulesConfig {
     println!("You can configure rules to allow/deny connections based on:");
     println!("  - Client IP address (CIDR notation, e.g., 192.168.1.0/24)");
     println!("  - TLS client random prefix (hex-encoded, e.g., aabbcc)");
+    println!("  - TLS client random with mask for bitwise matching");
     println!("  - Both conditions together");
     println!();
 
@@ -51,7 +53,7 @@ fn add_custom_rules(rules: &mut Vec<Rule>) {
             "2" => add_client_random_rule(rules),
             "3" => add_combined_rule(rules),
             _ => {
-                println!("Invalid choice. Skipping rule.");
+                warn!("Invalid choice. Skipping rule.");
                 continue;
             }
         }
@@ -67,7 +69,7 @@ fn add_ip_rule(rules: &mut Vec<Rule>) {
     
     // Validate CIDR format
     if let Err(_) = cidr.parse::<ipnet::IpNet>() {
-        println!("Invalid CIDR format. Skipping rule.");
+        warn!("Invalid CIDR format. Skipping rule.");
         return;
     }
     
@@ -79,30 +81,53 @@ fn add_ip_rule(rules: &mut Vec<Rule>) {
         action,
     });
     
-    println!("Rule added successfully.");
+    info!("Rule added successfully.");
 }
 
 fn add_client_random_rule(rules: &mut Vec<Rule>) {
-    let prefix = ask_for_input::<String>(
-        "Enter client random prefix (hex, e.g., aabbcc)",
+    let client_random_value = ask_for_input::<String>(
+        "Enter client random prefix (hex, format: prefix[/mask], e.g., aabbcc/ffff0000)",
         None,
     );
     
-    // Validate hex format
-    if let Err(_) = hex::decode(&prefix) {
-        println!("Invalid hex format. Skipping rule.");
-        return;
+    // Validate format
+    if let Some(slash_pos) = client_random_value.find('/') {
+        // Format: prefix/mask
+        let (prefix_part, mask_part) = client_random_value.split_at(slash_pos);
+        let mask_part = &mask_part[1..]; // Skip the '/'
+        
+        if mask_part.is_empty() {
+            warn!("Invalid format: mask is empty after '/'. Skipping rule.");
+            return;
+        }
+        
+        // Validate both prefix and mask are valid hex
+        if hex::decode(prefix_part).is_err() {
+            warn!("Invalid hex format in prefix part. Skipping rule.");
+            return;
+        }
+        
+        if hex::decode(mask_part).is_err() {
+            warn!("Invalid hex format in mask part. Skipping rule.");
+            return;
+        }
+    } else {
+        // Format: just prefix
+        if hex::decode(&client_random_value).is_err() {
+            warn!("Invalid hex format. Skipping rule.");
+            return;
+        }
     }
     
     let action = ask_for_rule_action();
     
     rules.push(Rule {
         cidr: None,
-        client_random_prefix: Some(prefix),
+        client_random_prefix: Some(client_random_value),
         action,
     });
     
-    println!("Rule added successfully.");
+    info!("Rule added successfully.");
 }
 
 fn add_combined_rule(rules: &mut Vec<Rule>) {
@@ -113,30 +138,53 @@ fn add_combined_rule(rules: &mut Vec<Rule>) {
     
     // Validate CIDR format
     if let Err(_) = cidr.parse::<ipnet::IpNet>() {
-        println!("Invalid CIDR format. Skipping rule.");
+        warn!("Invalid CIDR format. Skipping rule.");
         return;
     }
     
-    let prefix = ask_for_input::<String>(
-        "Enter client random prefix (hex, e.g., 001122)",
+    let client_random_value = ask_for_input::<String>(
+        "Enter client random prefix (hex, format: prefix or prefix/mask, e.g., 001122 or 001122/ffff00)",
         None,
     );
     
-    // Validate hex format
-    if let Err(_) = hex::decode(&prefix) {
-        println!("Invalid hex format. Skipping rule.");
-        return;
+    // Validate format
+    if let Some(slash_pos) = client_random_value.find('/') {
+        // Format: prefix/mask
+        let (prefix_part, mask_part) = client_random_value.split_at(slash_pos);
+        let mask_part = &mask_part[1..]; // Skip the '/'
+        
+        if mask_part.is_empty() {
+            warn!("Invalid format: mask is empty after '/'. Skipping rule.");
+            return;
+        }
+        
+        // Validate both prefix and mask are valid hex
+        if hex::decode(prefix_part).is_err() {
+            warn!("Invalid hex format in prefix part. Skipping rule.");
+            return;
+        }
+        
+        if hex::decode(mask_part).is_err() {
+            warn!("Invalid hex format in mask part. Skipping rule.");
+            return;
+        }
+    } else {
+        // Format: just prefix
+        if hex::decode(&client_random_value).is_err() {
+            warn!("Invalid hex format. Skipping rule.");
+            return;
+        }
     }
     
     let action = ask_for_rule_action();
     
     rules.push(Rule {
         cidr: Some(cidr),
-        client_random_prefix: Some(prefix),
+        client_random_prefix: Some(client_random_value),
         action,
     });
     
-    println!("Rule added successfully.");
+    info!("Rule added successfully.");
 }
 
 fn ask_for_rule_action() -> RuleAction {
