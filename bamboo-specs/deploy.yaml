@@ -84,7 +84,7 @@ Build on Linux:
   artifacts:
     - name: Build for Linux
       location: build_linux
-      pattern: 'trusttunnel-.*.tar.gz'
+      pattern: 'trusttunnel-*.tar.gz'
       required: true
       shared: true
 
