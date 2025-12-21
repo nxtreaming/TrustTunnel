@@ -1,5 +1,7 @@
 # CHANGELOG
 
+## 0.9.77
+
 - Added install script for the endpoint
 - Fixed project warnings
 - Changed structure of the `scripts` folder
