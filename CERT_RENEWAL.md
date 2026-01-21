@@ -6,8 +6,8 @@
 - [Prerequisites](#prerequisites)
 - [Install Certbot](#install-certbot)
 - [Issue the certificate](#issue-the-certificate)
-  - [Option A: standalone (recommended if nothing is listening on port 80)](#option-a-standalone-recommended-if-nothing-is-listening-on-port-80)
-  - [Option B: webroot (recommended if you already have an HTTP server)](#option-b-webroot-recommended-if-you-already-have-an-http-server)
+    - [Option A: standalone (recommended if nothing is listening on port 80)](#option-a-standalone-recommended-if-nothing-is-listening-on-port-80)
+    - [Option B: webroot (recommended if you already have an HTTP server)](#option-b-webroot-recommended-if-you-already-have-an-http-server)
 - [Configure TrustTunnel to use the Certbot certificate](#configure-trusttunnel-to-use-the-certbot-certificate)
 - [Enable automatic renewal](#enable-automatic-renewal)
 - [Ensure TrustTunnel reloads the renewed certificate](#ensure-trusttunnel-reloads-the-renewed-certificate)
@@ -67,7 +67,7 @@ sudo certbot certonly --webroot -w /var/www/html -d example.com
 
 After successful issuance, Certbot will print the paths you need:
 
-```
+```console
 Certificate is saved at: /etc/letsencrypt/live/example.com/fullchain.pem
 Key is saved at:         /etc/letsencrypt/live/example.com/privkey.pem
 ```
@@ -78,7 +78,7 @@ These files are symlinks managed by Certbot and are updated automatically on ren
 
 If you haven't generated TrustTunnel configuration yet, choose "Provide path to existing certificate" during the `setup_wizard` and provide these paths in any order, separated by space.
 
-```
+```console
 ? How would you like to create a certificate? ›
   Issue a Let's Encrypt certificate (requires a public domain)
   Generate a self-signed certificate
@@ -93,7 +93,7 @@ If you previously generated TrustTunnel configuration, change paths in your Trus
 
 Was:
 
-```
+```toml
 [[main_hosts]]
 hostname = "example.com"
 cert_chain_path = "certs/cert.pem"
@@ -102,7 +102,7 @@ private_key_path = "certs/key.pem"
 
 Now:
 
-```
+```toml
 [[main_hosts]]
 hostname = "example.com"
 cert_chain_path = "/etc/letsencrypt/live/example.com/fullchain.pem"
